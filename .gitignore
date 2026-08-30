@@ -1,0 +1,10 @@
+# Google credentials — never commit these.
+google_token.json
+client_secret.json
+*token*.json
+*client_secret*.json
+
+# CodeGraph index
+.codegraph/
+
+.DS_Store
