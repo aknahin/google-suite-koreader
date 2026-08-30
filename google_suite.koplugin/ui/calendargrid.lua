@@ -39,8 +39,8 @@ local _ = require("gettext")
 
 local Fmt = require("lib/fmt")
 local Gcal = require("lib/gcal")
+local Navbar = require("ui/navbar")
 local SectionButton = require("ui/sectionbutton")
-local ZenOS = require("lib/zenos")
 
 local Input = Device.input
 local Screen = Device.screen
@@ -57,7 +57,7 @@ local CalendarGrid = InputContainer:extend{
     on_navigate = nil,       -- function(step) with step -1 or 1
     on_menu = nil,
     on_section_switch = nil, -- function(); adds the Inbox button beside close
-    reserve_navbar = true,   -- false once we have rotated away from ZenOS
+    on_zen_navigate = nil,   -- function(tab_id); omitted hides the ZenOS navbar
     close_callback = nil,
 }
 
@@ -71,14 +71,8 @@ function CalendarGrid:cells()
 end
 
 function CalendarGrid:init()
-    -- Stop short of the ZenOS navbar so it stays visible; taps in the strip we
-    -- do not claim fall through the window stack to the bar's owner. Not while
-    -- we have rotated the screen, though: what is painted underneath is the
-    -- FileManager's last portrait frame, so the strip would expose a stale bar
-    -- rather than a usable one.
-    local reserved = self.reserve_navbar and ZenOS.navbarHeight() or 0
-    self.dimen = Geom:new{ w = Screen:getWidth(), h = Screen:getHeight() - reserved }
-    self.covers_fullscreen = reserved == 0
+    self.dimen = Geom:new{ w = Screen:getWidth(), h = Screen:getHeight() }
+    self.covers_fullscreen = true
 
     if Device:hasKeys() then
         self.key_events.Close = { { Input.group.Back } }
@@ -118,13 +112,29 @@ function CalendarGrid:init()
         SectionButton.attach(self.title_bar, "mail", self.on_section_switch)
     end
 
+    -- Our own copy of the ZenOS bar, drawn inside the page because a tap can
+    -- never reach the real one underneath. See ui/navbar.lua.
+    self.zen_navbar, self.zen_navbar_height = nil, 0
+    if self.on_zen_navigate then
+        self.zen_navbar, self.zen_navbar_height =
+            Navbar.build(self.dimen.w, self.on_zen_navigate)
+        self.zen_navbar_height = self.zen_navbar_height or 0
+    end
+
     local day_names = self:buildDayNames()
     local cells = self:cells()
     self.rows = #cells / 7
     self.grid_top = self.title_bar:getHeight() + day_names:getSize().h + self.rule
     local available = self.dimen.h - self.grid_top - self.outer_padding
+        - self.zen_navbar_height
     self.row_height = math.floor((available - (self.rows - 1) * self.rule) / self.rows)
     self.row_stride = self.row_height + self.rule
+
+    -- Rounding the row height down leaves a few pixels over; they go between
+    -- the last row and the navbar, so the bar still sits flush at the foot.
+    local rows_height = self.rows * self.row_height + (self.rows - 1) * self.rule
+    local slack = self.dimen.h - self.grid_top - rows_height - self.zen_navbar_height
+    self.zen_navbar_spacer = slack > 0 and VerticalSpan:new{ width = slack } or nil
 
     self[1] = FrameContainer:new{
         width = self.dimen.w,
@@ -139,6 +149,8 @@ function CalendarGrid:init()
             day_names,
             self:hairline(self.dimen.w),
             self:buildRows(cells),
+            self.zen_navbar_spacer,
+            self.zen_navbar,
         },
     }
 end

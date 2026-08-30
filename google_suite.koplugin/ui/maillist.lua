@@ -14,9 +14,9 @@ local Cache = require("lib/cache")
 local Fmt = require("lib/fmt")
 local Gmail = require("lib/gmail")
 local MailView = require("ui/mailview")
+local Navbar = require("ui/navbar")
 local SectionButton = require("ui/sectionbutton")
 local Task = require("ui/task")
-local ZenOS = require("lib/zenos")
 
 local MailList = {}
 MailList.__index = MailList
@@ -268,9 +268,8 @@ function MailList:show()
         is_borderless = true,
         is_popout = false,
         single_line = true,
-        -- Stop short of the ZenOS navbar so it stays visible and tappable.
-        height = ZenOS.pageHeight(),
-        covers_fullscreen = ZenOS.coversFullscreen(),
+        -- Leave room for the ZenOS bar that gets attached below.
+        height = Navbar.bodyHeight(),
         title_bar_left_icon = "appbar.menu",
         onLeftButtonTap = function() self:openNavMenu() end,
         onMenuSelect = function(_menu, item)
@@ -297,6 +296,9 @@ function MailList:show()
     SectionButton.attach(self.menu.title_bar, "calendar", function()
         self:close()
         self.hub.openAgenda("week")
+    end)
+    Navbar.attachToMenu(self.menu, function(tab_id)
+        Navbar.navigate(function() self:close() end, tab_id)
     end)
     UIManager:show(self.menu)
     self:load()

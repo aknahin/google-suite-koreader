@@ -23,9 +23,9 @@ for _i, name in ipairs({
     "lib/const", "lib/http", "lib/account", "lib/cache", "lib/fmt",
     "lib/mimeutil", "lib/batch", "lib/gmail", "lib/gcal", "lib/icons",
     "lib/zenos",
-    "ui/task", "ui/setup", "ui/sectionbutton", "ui/mailview", "ui/maillist",
-    "ui/agenda", "ui/calendargrid", "ui/eventlist", "ui/homewidget",
-    "ui/appview", "main",
+    "ui/task", "ui/setup", "ui/sectionbutton", "ui/navbar", "ui/mailview",
+    "ui/maillist", "ui/agenda", "ui/calendargrid", "ui/eventlist",
+    "ui/homewidget", "ui/appview", "main",
 }) do
     local ok, err = pcall(require, name)
     check("loads " .. name, ok, err)
@@ -388,23 +388,79 @@ check("the mail icon is present", Icons.path("mail") ~= nil)
 check("the calendar icon is present", Icons.path("calendar") ~= nil)
 equal("an unknown icon resolves to nothing", Icons.path("nope"), nil)
 
--- ZenOS navbar reservation. The stub screen is 800 tall.
+-- The ZenOS navbar. The stub screen is 800 tall.
 local ZenOS = require("lib/zenos")
-_G.__ZEN_UI_NAVBAR_HEIGHT = nil
-equal("no ZenOS means no reserved strip", ZenOS.navbarHeight(), 0)
-equal("the page is the whole screen without ZenOS", ZenOS.pageHeight(), 800)
-check("the page covers the screen without ZenOS", ZenOS.coversFullscreen())
+
+--- Stands in for the globals zenos.koplugin publishes.
+local function fakeZenOS(navbar_config, height)
+    _G.__ZEN_UI_NAVBAR_OPEN_TAB = function() return true end
+    _G.__ZEN_UI_PLUGIN = { config = { navbar = navbar_config } }
+    _G.__ZEN_UI_NAVBAR_HEIGHT = height
+end
+
+local function noZenOS()
+    _G.__ZEN_UI_NAVBAR_OPEN_TAB = nil
+    _G.__ZEN_UI_PLUGIN = nil
+    _G.__ZEN_UI_NAVBAR_HEIGHT = nil
+end
+
+noZenOS()
+equal("no ZenOS means no bar", ZenOS.navbarHeight(), 0)
+equal("no ZenOS means no tabs", ZenOS.tabs(), nil)
+check("openTab reports failure without ZenOS", not ZenOS.openTab("home"))
+
+-- A height with no way to navigate is not a bar worth drawing.
 _G.__ZEN_UI_NAVBAR_HEIGHT = 96
-equal("a published navbar height is reserved", ZenOS.navbarHeight(), 96)
-equal("the page stops above the navbar", ZenOS.pageHeight(), 704)
-check("the page no longer covers the screen", not ZenOS.coversFullscreen())
-_G.__ZEN_UI_NAVBAR_HEIGHT = 0
-equal("a zero height reserves nothing", ZenOS.navbarHeight(), 0)
-_G.__ZEN_UI_NAVBAR_HEIGHT = 600
+equal("a height alone is not enough", ZenOS.navbarHeight(), 0)
+
+fakeZenOS({ tab_order = { "books", "home" }, books_label = "", home_label = "" }, 96)
+equal("a configured bar takes its published height", ZenOS.navbarHeight(), 96)
+local tabs = ZenOS.tabs()
+equal("both tabs are drawn", #tabs, 2)
+equal("tab order is ZenOS's", tabs[1].id, "books")
+equal("a built-in tab gets its icon", tabs[1].icon, "library")
+equal("a built-in tab gets its label", tabs[2].label, "Home")
+check("openTab hands over to ZenOS", ZenOS.openTab("home"))
+
+-- Renamed tabs, and the two ZenOS lets the user rename.
+fakeZenOS({ tab_order = { "books", "home" }, books_label = "Shelf", home_label = "" }, 96)
+tabs = ZenOS.tabs()
+equal("a renamed library tab keeps the new name", tabs[1].label, "Shelf")
+equal("an unrenamed home tab keeps the default", tabs[2].label, "Home")
+
+-- Paging tabs act on the file list, which is not what is on our screen.
+fakeZenOS({ tab_order = { "page_left", "home", "page_right" } }, 96)
+tabs = ZenOS.tabs()
+equal("paging tabs are dropped", #tabs, 1)
+equal("the survivor is the real destination", tabs[1].id, "home")
+
+-- A custom tab ZenOS was configured with but we have no built-in entry for.
+fakeZenOS({
+    tab_order = { "custom_1" },
+    custom_tabs = { { id = "custom_1", label = "Work", icon = "tab_tags" } },
+}, 96)
+tabs = ZenOS.tabs()
+equal("a custom tab is carried through", tabs[1].label, "Work")
+equal("a custom tab keeps its icon", tabs[1].icon, "tab_tags")
+
+fakeZenOS({ tab_order = { "custom_2" }, custom_tabs = { { id = "custom_2", tag = "SciFi" } } }, 96)
+equal("an unlabelled custom tab falls back to its tag", ZenOS.tabs()[1].label, "SciFi")
+equal("an unlabelled custom tab falls back to a ZenOS icon", ZenOS.tabs()[1].icon, "zen_ui")
+
+-- An id in tab_order that matches nothing at all is skipped, not drawn blank.
+fakeZenOS({ tab_order = { "home", "who_knows" } }, 96)
+equal("an unknown tab id is dropped", #ZenOS.tabs(), 1)
+
+-- Bad or missing heights.
+fakeZenOS({ tab_order = { "home" } }, 600)
 equal("an implausible height is ignored", ZenOS.navbarHeight(), 0)
-_G.__ZEN_UI_NAVBAR_HEIGHT = "tall"
+fakeZenOS({ tab_order = { "home" } }, "tall")
 equal("a non-numeric height is ignored", ZenOS.navbarHeight(), 0)
-_G.__ZEN_UI_NAVBAR_HEIGHT = nil
+fakeZenOS({ tab_order = { "home" } }, 0)
+equal("a zero height draws no bar", ZenOS.navbarHeight(), 0)
+fakeZenOS({}, 96)
+equal("a bar with no tabs is no bar", ZenOS.navbarHeight(), 0)
+noZenOS()
 
 -- ZenOS launchability: mirrors zen-os modules/menu/app_launcher/plugin_scan.lua,
 -- which is what decides whether this plugin can be added as a navbar tab.

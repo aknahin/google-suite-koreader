@@ -14,6 +14,7 @@ avoid giving every row its own `InputContainer`.
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
+local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
@@ -21,6 +22,7 @@ local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local IconWidget = require("ui/widget/iconwidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local Size = require("ui/size")
@@ -35,8 +37,8 @@ local T = require("ffi/util").template
 local _ = require("gettext")
 
 local Fmt = require("lib/fmt")
+local Navbar = require("ui/navbar")
 local SectionButton = require("ui/sectionbutton")
-local ZenOS = require("lib/zenos")
 
 local Input = Device.input
 local Screen = Device.screen
@@ -50,7 +52,7 @@ local EventList = InputContainer:extend{
     on_menu = nil,           -- function(); omitted hides the title bar's left icon
     on_event_tap = nil,      -- function(event)
     on_section_switch = nil, -- function(); adds the Inbox button beside close
-    reserve_navbar = true,   -- false once the screen has been rotated
+    on_zen_navigate = nil,   -- function(tab_id); omitted hides the ZenOS navbar
     close_callback = nil,
 }
 
@@ -59,14 +61,8 @@ local TITLE_LINES = 2
 local NOTE_LINES = 2
 
 function EventList:init()
-    -- Stop short of the ZenOS navbar so it stays visible; taps in the strip we
-    -- do not claim fall through the window stack to the bar's owner. Not while
-    -- the screen has been rotated, though: what is painted underneath is the
-    -- FileManager's last portrait frame, so the strip would expose a stale bar
-    -- rather than a usable one.
-    local reserved = self.reserve_navbar and ZenOS.navbarHeight() or 0
-    self.dimen = Geom:new{ w = Screen:getWidth(), h = Screen:getHeight() - reserved }
-    self.covers_fullscreen = reserved == 0
+    self.dimen = Geom:new{ w = Screen:getWidth(), h = Screen:getHeight() }
+    self.covers_fullscreen = true
     self.page = self.page or 1
 
     if Device:hasKeys() then
@@ -83,10 +79,26 @@ function EventList:init()
     self.card_gap = Size.padding.small
     self.content_width = self.dimen.w - 2 * self.outer_padding
 
+    -- Size.line.thin is scaleBySize(0.5), which can round to 0 on a low-DPI
+    -- Kindle and leave the page bar with no rule above it at all.
+    self.rule = math.max(Size.line.medium or 1, 1)
+
+    -- Our own copy of the ZenOS bar, drawn inside the page because a tap can
+    -- never reach the real one underneath. See ui/navbar.lua.
+    self.zen_navbar, self.zen_navbar_height = nil, 0
+    if self.on_zen_navigate then
+        self.zen_navbar, self.zen_navbar_height =
+            Navbar.build(self.dimen.w, self.on_zen_navigate)
+        self.zen_navbar_height = self.zen_navbar_height or 0
+    end
+
     local blocks = self:buildBlocks()
-    -- The title bar's height depends on the subtitle, which depends on the page
-    -- count, which depends on the title bar's height. Lay out once against a
-    -- placeholder subtitle so the second pass cannot change the geometry.
+    -- Chicken and egg: the page bar's height comes off the space the cards get,
+    -- and how many pages there are decides whether there is a page bar at all.
+    -- The bar is a fixed height whether it says "1 of 1" or "3 of 9", so it is
+    -- measured first and that height reserved unconditionally. Laying out
+    -- against a bar that might vanish is what would make a page overflow.
+    self:measurePageBar()
     self:layoutTitleBar(" ")
     self.pages = self:paginate(blocks)
     if self.page > #self.pages then self.page = #self.pages end
@@ -104,21 +116,19 @@ function EventList:init()
             align = "left",
             self.title_bar,
             self:buildPage(),
+            self:buildPageBar(),
+            self.zen_navbar,
         },
     }
 end
 
 --- Always a non-empty string. The title bar reserves a subtitle line only when
 --- it has one, and pagination is measured against the bar's height, so letting
---- it come and go would make the first page overflow by exactly that line.
+--- it come and go would make the first page overflow by exactly that line. The
+--- page count lives in the footer, not here.
 function EventList:subtitleText()
-    local parts = {}
-    if self.subtitle and self.subtitle ~= "" then parts[#parts + 1] = self.subtitle end
-    if #self.pages > 1 then
-        parts[#parts + 1] = T(_("Page %1 of %2"), self.page, #self.pages)
-    end
-    if #parts == 0 then return " " end
-    return table.concat(parts, " · ")
+    if self.subtitle and self.subtitle ~= "" then return self.subtitle end
+    return " "
 end
 
 function EventList:layoutTitleBar(subtitle)
@@ -141,6 +151,7 @@ function EventList:layoutTitleBar(subtitle)
     end
     self.content_top = self.title_bar:getHeight()
     self.content_height = self.dimen.h - self.content_top - self.outer_padding
+        - (self.page_bar_height or 0) - (self.zen_navbar_height or 0)
 end
 
 -- ------------------------------------------------------------------ blocks ---
@@ -375,6 +386,15 @@ function EventList:buildPage()
         end
         y = y + block.height
     end
+
+    -- Push the page bar down to the foot rather than letting it ride up under
+    -- the last card on a short page.
+    local slack = self.content_top + self.content_height - y
+    if slack > 0 then
+        table.insert(group, VerticalSpan:new{ width = slack })
+        y = y + slack
+    end
+    self.page_bar_top = y
     return group
 end
 
@@ -387,11 +407,96 @@ function EventList:goToPage(page)
     UIManager:setDirty(self, "full")
 end
 
+-- --------------------------------------------------------------- page bar ---
+
+--[[--
+The page bar's height, which is the same whatever it ends up saying.
+
+Measured before anything is laid out because the cards are given whatever is
+left over; deciding afterwards would mean paginating against a height the page
+does not actually have.
+--]]
+function EventList:measurePageBar()
+    local probe = TextWidget:new{ text = "0 / 0", face = Font:getFace("smallinfofont") }
+    local text_height = probe:getSize().h
+    probe:free()
+    self.page_bar_icon = math.floor(text_height * 1.2)
+    self.page_bar_height = math.max(text_height, self.page_bar_icon)
+        + 2 * Size.padding.default + self.rule
+end
+
+--- A chevron, or an equally wide blank when there is nowhere to go that way.
+function EventList:pageChevron(icon_name, enabled)
+    local size = self.page_bar_icon
+    if not enabled then
+        return HorizontalSpan:new{ width = size }
+    end
+    local ok, icon = pcall(IconWidget.new, IconWidget, {
+        icon = icon_name, width = size, height = size, alpha = true,
+    })
+    if ok and icon then return icon end
+    return HorizontalSpan:new{ width = size }
+end
+
+--[[--
+The footer: ‹ 2 of 5 ›, with a rule above it.
+
+Taps are resolved in `onTap` against `page_bar_top` and the thirds below,
+matching how the cards are hit-tested — the whole widget already owns one tap
+handler, so the chevrons do not need containers of their own.
+--]]
+function EventList:buildPageBar()
+    local total = #self.pages
+    local third = math.floor(self.dimen.w / 3)
+    local row_height = self.page_bar_height - self.rule
+
+    local label = TextWidget:new{
+        text = T(_("%1 of %2"), self.page, total),
+        face = Font:getFace("smallinfofont"),
+        fgcolor = Blitbuffer.COLOR_DARK_GRAY,
+        max_width = third,
+    }
+
+    local function cell(widget, width)
+        return CenterContainer:new{
+            dimen = Geom:new{ w = width, h = row_height },
+            widget,
+        }
+    end
+
+    return VerticalGroup:new{
+        align = "left",
+        LineWidget:new{
+            dimen = Geom:new{ w = self.dimen.w, h = self.rule },
+            background = Blitbuffer.COLOR_GRAY,
+        },
+        HorizontalGroup:new{
+            align = "center",
+            cell(self:pageChevron("chevron.left", self.page > 1), third),
+            cell(label, self.dimen.w - 2 * third),
+            cell(self:pageChevron("chevron.right", self.page < total), third),
+        },
+    }
+end
+
 -- ------------------------------------------------------------------ events ---
 
 function EventList:onTap(_arg, ges)
     local pos = ges and ges.pos
     if not pos then return true end
+
+    local page_bar_bottom = self.dimen.h - (self.zen_navbar_height or 0)
+    if self.page_bar_top and pos.y >= self.page_bar_top
+            and pos.y < page_bar_bottom then
+        local third = math.floor(self.dimen.w / 3)
+        if pos.x < third then
+            return self:onPrevPage()
+        elseif pos.x >= self.dimen.w - third then
+            return self:onNextPage()
+        end
+        return true
+    end
+
     for _i, zone in ipairs(self.hit_zones or {}) do
         if pos.y >= zone.top and pos.y <= zone.bottom then
             if self.on_event_tap then self.on_event_tap(zone.event) end

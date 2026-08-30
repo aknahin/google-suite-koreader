@@ -18,6 +18,7 @@ local Account = require("lib/account")
 local Cache = require("lib/cache")
 local CalendarGrid = require("ui/calendargrid")
 local EventList = require("ui/eventlist")
+local Navbar = require("ui/navbar")
 local Fmt = require("lib/fmt")
 local Gcal = require("lib/gcal")
 local Task = require("ui/task")
@@ -217,6 +218,9 @@ function Agenda:showList()
         on_menu = function() self:openNavMenu() end,
         on_event_tap = function(event) self:showEvent(event) end,
         on_section_switch = function() self:openMail() end,
+        on_zen_navigate = function(tab_id)
+            Navbar.navigate(function() self:close() end, tab_id)
+        end,
         close_callback = function()
             self.list = nil
             self:close()
@@ -273,7 +277,6 @@ function Agenda:showGrid()
     self:enterLandscape()
     local cells = self:period()
     self.grid = CalendarGrid:new{
-        reserve_navbar = not self.rotated,
         mode = self:mode(),
         anchor = self:anchorKey(),
         start_dow = self:startDow(),
@@ -281,6 +284,9 @@ function Agenda:showGrid()
         title = self:gridTitle(cells),
         on_menu = function() self:openNavMenu() end,
         on_section_switch = function() self:openMail() end,
+        on_zen_navigate = function(tab_id)
+            Navbar.navigate(function() self:close() end, tab_id)
+        end,
         on_day_tap = function(day_key) self:showDay(day_key) end,
         on_navigate = function(step)
             self:shiftAnchor(step)
@@ -306,8 +312,6 @@ function Agenda:showDay(day_key)
         title = Fmt.dayHeading(day_key),
         events = self.events_by_day[day_key] or {},
         day_headings = false,
-        -- Opened from the grid, which may have turned the screen.
-        reserve_navbar = not self.rotated,
         on_event_tap = function(event) self:showEvent(event) end,
         close_callback = function() self.day_list = nil end,
     }
