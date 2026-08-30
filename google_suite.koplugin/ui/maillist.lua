@@ -13,6 +13,7 @@ local _ = require("gettext")
 local Cache = require("lib/cache")
 local Fmt = require("lib/fmt")
 local Gmail = require("lib/gmail")
+local ComposeView = require("ui/compose")
 local MailView = require("ui/mailview")
 local Navbar = require("ui/navbar")
 local SectionButton = require("ui/sectionbutton")
@@ -25,6 +26,9 @@ MailList.VIEWS = {
     { key = "inbox",   title = _("Inbox"),    query = "in:inbox" },
     { key = "unread",  title = _("Unread"),   query = "in:inbox is:unread" },
     { key = "starred", title = _("Starred"),  query = "is:starred" },
+    { key = "sent",    title = _("Sent"),     query = "in:sent" },
+    -- Opening one of these reopens the composer rather than the reader.
+    { key = "drafts",  title = _("Drafts"),   query = "in:drafts", drafts = true },
     { key = "all",     title = _("All mail"), query = "in:anywhere" },
 }
 
@@ -228,6 +232,22 @@ function MailList:openSearch()
     input:onShowKeyboard()
 end
 
+--[[--
+Reopens a draft in the composer.
+
+The list only holds each message's summary, so the body has to be fetched before
+anything can be edited — reopening a draft with an empty body would look like
+the draft had been lost.
+--]]
+function MailList:editDraft(summary)
+    Task.run(_("Opening draft…"), function()
+        return Gmail.get(summary.id)
+    end, function(message, err)
+        if not message then return Task.error(err) end
+        ComposeView.editDraft(message, function() self:load(true) end)
+    end)
+end
+
 function MailList:openNavMenu()
     local dialog
     local buttons = {}
@@ -241,6 +261,11 @@ function MailList:openNavMenu()
             end,
         } }
     end
+    buttons[#buttons + 1] = { { text = _("New message"), align = "left",
+        callback = function()
+            UIManager:close(dialog)
+            ComposeView.newMessage(function() self:load(true) end)
+        end } }
     buttons[#buttons + 1] = { { text = _("Search mail"), align = "left",
         callback = function() UIManager:close(dialog) self:openSearch() end } }
     buttons[#buttons + 1] = { { text = _("Refresh"), align = "left",
@@ -273,6 +298,10 @@ function MailList:show()
         title_bar_left_icon = "appbar.menu",
         onLeftButtonTap = function() self:openNavMenu() end,
         onMenuSelect = function(_menu, item)
+            if item.message and self:view().drafts then
+                self:editDraft(item.message)
+                return true
+            end
             if item.message then
                 -- The whole list goes in so the viewer can offer Previous/Next.
                 MailView.show{

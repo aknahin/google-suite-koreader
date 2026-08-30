@@ -33,7 +33,7 @@ local OWN_UI = {
     ["ui/mailview"] = true, ["ui/agenda"] = true, ["ui/appview"] = true,
     ["ui/homewidget"] = true, ["ui/calendargrid"] = true,
     ["ui/eventlist"] = true, ["ui/sectionbutton"] = true,
-    ["ui/navbar"] = true,
+    ["ui/navbar"] = true, ["ui/compose"] = true,
 }
 
 -- A screen with real numbers. lib/zenos does arithmetic against the screen

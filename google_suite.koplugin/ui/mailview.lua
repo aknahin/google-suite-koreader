@@ -17,6 +17,7 @@ local _ = require("gettext")
 local Account = require("lib/account")
 local Cache = require("lib/cache")
 local Fmt = require("lib/fmt")
+local ComposeView = require("ui/compose")
 local Gmail = require("lib/gmail")
 local SectionButton = require("ui/sectionbutton")
 local Task = require("ui/task")
@@ -134,7 +135,30 @@ function MailView.show(opts)
             }
         end
 
+        --- Answering closes the reader: the composer is what the user wants in
+        --- front of them, and coming back to the original afterwards is a tap.
+        local function answer(label, open)
+            return {
+                text = label,
+                callback = function()
+                    UIManager:close(viewer)
+                    open(message, function()
+                        if on_change then on_change(false) end
+                    end)
+                end,
+            }
+        end
+
         local buttons = {
+            {
+                answer(_("Reply"), function(msg, done)
+                    ComposeView.reply(msg, false, done)
+                end),
+                answer(_("Reply all"), function(msg, done)
+                    ComposeView.reply(msg, true, done)
+                end),
+                answer(_("Forward"), ComposeView.forward),
+            },
             {
                 {
                     text = "◀ " .. _("Previous"),

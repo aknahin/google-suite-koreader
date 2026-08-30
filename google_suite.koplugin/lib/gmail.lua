@@ -120,7 +120,16 @@ function Gmail.get(id)
     if not message then return nil, err end
 
     local summary = summarize(message)
-    summary.to = MimeUtil.decodeHeader(MimeUtil.header(message.payload and message.payload.headers, "To") or "")
+    local headers = message.payload and message.payload.headers
+    summary.to = MimeUtil.decodeHeader(MimeUtil.header(headers, "To") or "")
+    summary.cc = MimeUtil.decodeHeader(MimeUtil.header(headers, "Cc") or "")
+    -- Threading: a reply without these starts a new conversation everywhere,
+    -- Gmail's own web client included. Never decoded — they are opaque ids,
+    -- not display text.
+    summary.message_id = MimeUtil.header(headers, "Message-ID")
+        or MimeUtil.header(headers, "Message-Id")
+    summary.references = MimeUtil.header(headers, "References")
+    summary.reply_to = MimeUtil.decodeHeader(MimeUtil.header(headers, "Reply-To") or "")
 
     -- Keep both renderings available: the viewer picks by user preference, and
     -- falls back to text if the HTML turns out to be empty after sanitizing.
@@ -185,6 +194,97 @@ function Gmail.modify(id, add, remove)
 end
 
 
+
+-- ----------------------------------------------------------------- sending ---
+
+local DRAFTS_URL = Const.GMAIL_API .. "/users/me/drafts"
+
+--[[--
+Sends a message built by `lib/compose.lua`.
+
+The existing `gmail.modify` scope already covers this, so nothing has to be
+re-authorised to start sending.
+
+@tparam string raw an RFC 2822 message
+@tparam string|nil thread_id keeps a reply in its conversation
+@treturn table|nil the sent message resource, or nil plus a message
+--]]
+function Gmail.send(raw, thread_id)
+    local payload = { raw = MimeUtil.encodeBase64Url(raw) }
+    if thread_id then payload.threadId = thread_id end
+    local response, err = Account:request{
+        url = messagesUrl("/send"),
+        method = "POST",
+        headers = { ["Content-Type"] = "application/json" },
+        body = JSON.encode(payload),
+    }
+    if not response then return nil, err end
+    return response
+end
+
+--- Stores a message without sending it. @treturn table|nil the draft resource
+function Gmail.saveDraft(raw, thread_id, draft_id)
+    local message = { raw = MimeUtil.encodeBase64Url(raw) }
+    if thread_id then message.threadId = thread_id end
+    local payload = { message = message }
+
+    -- Updating an existing draft rather than leaving two copies behind.
+    local url, method = DRAFTS_URL, "POST"
+    if draft_id then
+        payload.id = draft_id
+        url, method = DRAFTS_URL .. "/" .. draft_id, "PUT"
+    end
+
+    local response, err = Account:request{
+        url = url,
+        method = method,
+        headers = { ["Content-Type"] = "application/json" },
+        body = JSON.encode(payload),
+    }
+    if not response then return nil, err end
+    return response
+end
+
+--- Sends a stored draft, which also removes it from Drafts.
+function Gmail.sendDraft(draft_id)
+    local response, err = Account:request{
+        url = DRAFTS_URL .. "/send",
+        method = "POST",
+        headers = { ["Content-Type"] = "application/json" },
+        body = JSON.encode{ id = draft_id },
+    }
+    if not response then return nil, err end
+    return response
+end
+
+--[[--
+The draft id holding a given message, or nil.
+
+The Drafts view lists *messages*, because that is what every other view lists,
+but editing one means addressing the draft that wraps it — and only
+`users.drafts.list` knows that mapping.
+--]]
+function Gmail.draftIdForMessage(message_id)
+    local response, err = Account:request{
+        url = Http.url(DRAFTS_URL, { maxResults = 200 }),
+    }
+    if not response then return nil, err end
+    for _i, draft in ipairs(response.drafts or {}) do
+        if draft.message and draft.message.id == message_id then
+            return draft.id
+        end
+    end
+end
+
+function Gmail.deleteDraft(draft_id)
+    local response, err = Account:request{
+        url = DRAFTS_URL .. "/" .. draft_id,
+        method = "DELETE",
+        headers = { ["Content-Length"] = "0" },
+    }
+    if not response then return nil, err end
+    return true
+end
 
 function Gmail.trash(id)
     local response, err = Account:request{

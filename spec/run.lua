@@ -22,8 +22,8 @@ end
 for _i, name in ipairs({
     "lib/const", "lib/http", "lib/account", "lib/cache", "lib/fmt",
     "lib/mimeutil", "lib/batch", "lib/gmail", "lib/gcal", "lib/icons",
-    "lib/zenos",
-    "ui/task", "ui/setup", "ui/sectionbutton", "ui/navbar", "ui/mailview",
+    "lib/zenos", "lib/compose",
+    "ui/task", "ui/setup", "ui/sectionbutton", "ui/navbar", "ui/compose", "ui/mailview",
     "ui/maillist", "ui/agenda", "ui/calendargrid", "ui/eventlist",
     "ui/homewidget", "ui/appview", "main",
 }) do
@@ -531,6 +531,133 @@ check("data attributes are gone", not scripted:find("data-id", 1, true))
 check("the text is kept", scripted:find("safe", 1, true) ~= nil)
 
 equal("non-string input is still tolerated", MimeUtil.sanitizeHtml(nil), "")
+
+-- Base64, written out rather than taken from LuaSocket's chunked mime.b64.
+equal("base64 of one byte pads twice", MimeUtil.encodeBase64("a"), "YQ==")
+equal("base64 of two bytes pads once", MimeUtil.encodeBase64("ab"), "YWI=")
+equal("base64 of three bytes does not pad", MimeUtil.encodeBase64("abc"), "YWJj")
+equal("base64 of empty input", MimeUtil.encodeBase64(""), "")
+equal("base64 round trip", MimeUtil.decodeBase64Url(MimeUtil.encodeBase64("Hello, world!")),
+      "Hello, world!")
+equal("base64 handles high bytes", MimeUtil.encodeBase64(string.char(0xFF, 0xEF)), "/+8=")
+-- The url-safe alphabet swaps those two characters and drops the padding.
+equal("base64url swaps + and /", MimeUtil.encodeBase64Url(string.char(0xFF, 0xEF)), "_-8")
+equal("base64url round trip",
+      MimeUtil.decodeBase64Url(MimeUtil.encodeBase64Url("Café ☕")), "Café ☕")
+equal("base64 wraps at 76 characters",
+      #MimeUtil.wrapBase64(string.rep("A", 100), "\r\n"), 100 + 2)
+
+-- RFC 2047: encode only what has to be encoded.
+equal("an ascii subject is left alone", MimeUtil.encodeHeaderWord("Weekly report"),
+      "Weekly report")
+equal("a non-ascii subject is encoded", MimeUtil.encodeHeaderWord("Café"),
+      "=?UTF-8?B?Q2Fmw6k=?=")
+equal("an encoded subject decodes back",
+      MimeUtil.decodeHeader(MimeUtil.encodeHeaderWord("Café ☕")), "Café ☕")
+
+-- Address lists: the display name is encoded, the address never is.
+equal("an ascii address list is left alone",
+      MimeUtil.encodeAddressList("ada@example.com, bob@example.com"),
+      "ada@example.com, bob@example.com")
+local encoded_list = MimeUtil.encodeAddressList('"Café Owner" <cafe@example.com>')
+check("the address survives encoding", encoded_list:find("<cafe@example.com>", 1, true) ~= nil)
+check("the display name is encoded", encoded_list:find("=?UTF-8?B?", 1, true) ~= nil)
+local two_up = MimeUtil.encodeAddressList('"Zoë" <z@example.com>, bob@example.com')
+check("a second plain address is preserved",
+      two_up:find("bob@example.com", 1, true) ~= nil)
+-- A comma inside a quoted display name must not split the list.
+local quoted = MimeUtil.encodeAddressList('"Doe, Jané" <jane@example.com>')
+check("a comma inside quotes does not split", quoted:find("<jane@example.com>", 1, true) ~= nil)
+check("only one address came out", select(2, quoted:gsub("<", "<")) == 1)
+
+-- Building a message.
+local ComposeLib = require("lib/compose")
+local raw = ComposeLib.build{
+    from = "me@example.com", to = "ada@example.com", subject = "Hi",
+    body = "line one\nline two", epoch = 0,
+}
+check("the From header is set", raw:find("From: me@example.com", 1, true) ~= nil)
+check("the To header is set", raw:find("To: ada@example.com", 1, true) ~= nil)
+check("the Subject header is set", raw:find("Subject: Hi", 1, true) ~= nil)
+check("headers are CRLF separated", raw:find("\r\n", 1, true) ~= nil)
+check("the transfer encoding is declared",
+      raw:find("Content-Transfer-Encoding: base64", 1, true) ~= nil)
+check("the charset is declared", raw:find('charset="UTF-8"', 1, true) ~= nil)
+check("an empty Cc is omitted", not raw:find("Cc:", 1, true))
+check("an empty In-Reply-To is omitted", not raw:find("In-Reply-To", 1, true))
+equal("the date is rendered in UTC", ComposeLib.date(0), "Thu, 01 Jan 1970 00:00:00 +0000")
+
+-- The body is the base64 after the blank line separating it from the headers.
+local body64 = raw:match("\r\n\r\n(.*)$"):gsub("\r\n", "")
+equal("the body round trips", MimeUtil.decodeBase64Url(body64), "line one\nline two")
+
+-- A header value may never carry its own line break: anything after one would
+-- be read as a header of its own. The break is folded to a space, so the text
+-- stays on the To line as an unusable address rather than becoming a real Bcc.
+local injected = ComposeLib.build{ to = "a@b.c\r\nBcc: sneak@evil.example", body = "" }
+local function hasHeaderLine(raw_message, name)
+    for line in (raw_message .. "\r\n"):gmatch("(.-)\r\n") do
+        if line == "" then return false end -- headers end at the blank line
+        if line:lower():sub(1, #name + 1) == name:lower() .. ":" then return true end
+    end
+    return false
+end
+check("the injected line never becomes a header", not hasHeaderLine(injected, "Bcc"))
+check("it is folded into the To line instead",
+      injected:find("To: a@b.c Bcc: sneak@evil.example", 1, true) ~= nil)
+check("a real header is still found by the same test", hasHeaderLine(injected, "To"))
+
+-- Replies.
+local original = {
+    id = "m1", thread_id = "t1", subject = "Lunch",
+    from = "Ada", from_address = "ada@example.com",
+    to = "me@example.com, bob@example.com", cc = "carol@example.com",
+    body = "Are you free?", timestamp = 0, message_id = "<abc@mail>",
+}
+local reply = ComposeLib.reply(original, { self_address = "me@example.com" })
+equal("a reply goes to the sender", reply.to, "ada@example.com")
+equal("a reply prefixes the subject", reply.subject, "Re: Lunch")
+equal("a reply threads", reply.in_reply_to, "<abc@mail>")
+check("a reply quotes the original", reply.body:find("> Are you free?", 1, true) ~= nil)
+check("a reply attributes the quote", reply.body:find("Ada wrote:", 1, true) ~= nil)
+equal("a plain reply has no Cc", reply.cc, "")
+
+local reply_all = ComposeLib.reply(original, { all = true, self_address = "me@example.com" })
+check("reply-all keeps the other recipients",
+      reply_all.cc:find("bob@example.com", 1, true) ~= nil)
+check("reply-all keeps those on Cc", reply_all.cc:find("carol@example.com", 1, true) ~= nil)
+check("reply-all does not Cc ourselves", not reply_all.cc:find("me@example.com", 1, true))
+check("reply-all does not Cc the person being replied to",
+      not reply_all.cc:find("ada@example.com", 1, true))
+
+-- Re: is added once, however many rounds it has been through.
+equal("Re: is not doubled",
+      ComposeLib.reply({ subject = "Re: Lunch", from_address = "a@b.c" }, {}).subject,
+      "Re: Lunch")
+equal("a lowercase re: also counts",
+      ComposeLib.reply({ subject = "re: Lunch", from_address = "a@b.c" }, {}).subject,
+      "re: Lunch")
+
+-- Reply-To wins over From when the sender asked for it.
+equal("Reply-To is honoured",
+      ComposeLib.reply({ reply_to = "list@example.com", from_address = "bounce@example.com" },
+                       {}).to,
+      "list@example.com")
+
+-- Forwarding.
+local forwarded = ComposeLib.forward(original)
+equal("a forward prefixes the subject", forwarded.subject, "Fwd: Lunch")
+equal("a forward has no recipient yet", forwarded.to, "")
+check("a forward inlines the original", forwarded.body:find("Are you free?", 1, true) ~= nil)
+check("a forward keeps the original sender",
+      forwarded.body:find("ada@example.com", 1, true) ~= nil)
+
+-- The mail views the compose work added.
+equal("sent has a view", MailList.indexOfView("sent") ~= nil, true)
+equal("drafts has a view", MailList.indexOfView("drafts") ~= nil, true)
+check("only the drafts view opens the composer",
+      MailList.VIEWS[MailList.indexOfView("drafts")].drafts == true
+      and MailList.VIEWS[MailList.indexOfView("sent")].drafts == nil)
 
 -- ZenOS launchability: mirrors zen-os modules/menu/app_launcher/plugin_scan.lua,
 -- which is what decides whether this plugin can be added as a navbar tab.

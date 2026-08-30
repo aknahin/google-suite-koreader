@@ -4,10 +4,15 @@ Gmail and Google Calendar inside KOReader, designed for e-ink and for
 [ZenOS](https://github.com/xZenLabs/zen-os) — it registers itself as a launchable
 plugin, so it can be added as a navbar tab and contribute a Home-page widget.
 
-- **Mail** — Inbox / Unread / Starred / All mail, Gmail search syntax, Previous
-  and Next to walk the list from inside a message, and triage: mark read or
-  unread, star, archive, trash. HTML mail is rendered as HTML (KOReader's own
-  engine), with a one-tap switch to plain text.
+- **Mail** — Inbox / Unread / Starred / Sent / Drafts / All mail, Gmail search
+  syntax, Previous and Next to walk the list from inside a message, and triage:
+  mark read or unread, star, archive, trash. HTML mail is normalised before it
+  is rendered, so modern mail lays out on a small screen instead of overflowing
+  it; one tap switches to plain text.
+- **Writing** — compose, reply, reply-all, forward, and save as a draft.
+  Messages go out as plain text: a Kindle keyboard is not somewhere to write
+  markup, and `text/plain` renders correctly everywhere. Opening something from
+  Drafts reopens it in the composer rather than the reader.
 - **Calendar** — read-only, in three views: an agenda of event cards grouped by
   day, a week grid, and a month grid. The grids switch to landscape, because
   seven columns on a 6" screen in portrait leaves about 150px each. The agenda
@@ -20,7 +25,7 @@ plugin, so it can be added as a navbar tab and contribute a Home-page widget.
   its close icon, and every calendar page a mail button, so switching never goes
   through a menu.
 
-Composing mail and creating events are deliberately out of scope for now.
+Creating calendar events is deliberately out of scope for now.
 
 ## Why sign-in happens on a computer
 
@@ -251,13 +256,15 @@ radio. The cache it reads is refreshed by any calendar view, so it stays current
 whether you use the agenda or the grids. Tapping a box opens what it is showing:
 the left one your unread mail, the right one the agenda.
 
-**5.4a The ZenOS navbar**: plugin pages stop short of the bottom of the screen
-so ZenOS's navigation bar stays visible and tappable underneath them. That is as
-far as the integration can go — ZenOS builds the bar inside its own navbar patch
-and mounts it only into pages it owns, picked from a hardcoded list of its page
-names, so a third-party plugin cannot host a real one or light up its own tab.
-The grid views turn the screen to landscape and give the strip back while they
-do, since the bar underneath is still drawn portrait.
+**5.4a The ZenOS navbar**: plugin pages carry a navigation bar at the foot,
+built from ZenOS's own tab configuration — same tabs, same order, same height —
+with every tap handed back to ZenOS.
+
+It has to be our own copy rather than ZenOS's. `UIManager:sendEvent` gives an
+event to the topmost widget and then only to widgets flagged `is_always_active`,
+so simply leaving a gap for the real bar underneath produces one that is visible
+and completely dead. The bar does not highlight an active tab: none of those
+tabs is what is on screen while this plugin is open.
 
 **5.5 Bind a gesture** (optional): *Tools > Gestures* — the plugin registers a
 **Google Suite** action you can attach to any gesture or key.
@@ -319,7 +326,8 @@ google_suite.koplugin/
   lib/http.lua      JSON over HTTPS with certificate verification
   lib/account.lua   token storage, refresh, authorized requests
   lib/batch.lua     Google's multipart batch protocol, shared by both APIs
-  lib/gmail.lua     list (batched metadata), read, triage
+  lib/gmail.lua     list (batched metadata), read, triage, send and drafts
+  lib/compose.lua   builds the RFC 2822 messages Gmail's raw field takes
   lib/gcal.lua      calendars, agenda and grid ranges; timezone-safe date math
   lib/mimeutil.lua  base64url, quoted-printable, RFC 2047, HTML sanitising
   lib/cache.lua     disk cache
@@ -327,6 +335,8 @@ google_suite.koplugin/
   lib/zenos.lua     the ZenOS globals: navbar height, home-item registration
   ui/calendargrid   the month/week grid widget, with rotation handling
   ui/eventlist      the paged list of event cards, shared by agenda and day view
+  ui/compose        the composer: new, reply, forward, edit draft
+  ui/navbar         our own copy of the ZenOS tab bar, drawn inside the page
   ui/sectionbutton  the mail/calendar button placed beside a title bar's close
   ui/               menus, message view, agenda, setup, ZenOS home widget
   icons/            plugin-owned SVGs, loaded by path rather than by name

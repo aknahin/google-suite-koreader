@@ -228,6 +228,111 @@ function MimeUtil.sanitizeHtml(html)
     return text
 end
 
+-- ---------------------------------------------------------------- encoding ---
+
+local B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+--[[--
+Base64, written out rather than taken from LuaSocket's `mime`.
+
+`mime.b64` is a filter: it encodes the largest unambiguous prefix and hands back
+the remainder for the next chunk, so using it for a whole string means getting
+the two-call dance right every time. A message that has to be encoded exactly
+once is not worth that.
+--]]
+function MimeUtil.encodeBase64(text)
+    if type(text) ~= "string" then return "" end
+    local out = {}
+    for index = 1, #text, 3 do
+        local a, b, c = text:byte(index, index + 2)
+        local packed = a * 65536 + (b or 0) * 256 + (c or 0)
+        local chunk = {}
+        for shift = 18, 0, -6 do
+            local sextet = math.floor(packed / 2 ^ shift) % 64
+            chunk[#chunk + 1] = B64_ALPHABET:sub(sextet + 1, sextet + 1)
+        end
+        if not b then
+            chunk[3], chunk[4] = "=", "="
+        elseif not c then
+            chunk[4] = "="
+        end
+        out[#out + 1] = table.concat(chunk)
+    end
+    return table.concat(out)
+end
+
+--- The URL-safe alphabet Gmail wants for a message's `raw` field. Padding is
+--- optional there and dropped, matching how Gmail hands messages back.
+function MimeUtil.encodeBase64Url(text)
+    return (MimeUtil.encodeBase64(text):gsub("%+", "-"):gsub("/", "_"):gsub("=", ""))
+end
+
+--- Splits base64 into the 76-character lines RFC 2045 asks for.
+function MimeUtil.wrapBase64(text, eol)
+    eol = eol or "\r\n"
+    local lines = {}
+    for index = 1, #text, 76 do
+        lines[#lines + 1] = text:sub(index, index + 75)
+    end
+    return table.concat(lines, eol)
+end
+
+--- True when every byte is a printable US-ASCII character a header may carry.
+local function isHeaderSafeAscii(text)
+    return text:find("^[\32-\126]*$") ~= nil
+end
+
+--[[--
+An RFC 2047 encoded-word, but only when one is needed.
+
+Anything that is already printable ASCII goes through untouched — encoding it
+would just make the header unreadable to anyone looking at the source.
+--]]
+function MimeUtil.encodeHeaderWord(text)
+    if type(text) ~= "string" or text == "" then return "" end
+    if isHeaderSafeAscii(text) then return text end
+    return "=?UTF-8?B?" .. MimeUtil.encodeBase64(text) .. "?="
+end
+
+--[[--
+Encodes the display names in an address list, leaving the addresses alone.
+
+`=?UTF-8?B?...?=` around a whole `Ada <ada@x>` would make the address part of
+the encoded word and the header unusable, so each entry is split first. Commas
+inside a quoted display name are respected; anything more exotic than that is
+passed through as the user typed it.
+--]]
+function MimeUtil.encodeAddressList(text)
+    if type(text) ~= "string" or text == "" then return "" end
+    if isHeaderSafeAscii(text) then return text end
+
+    local out = {}
+    local current, in_quotes = {}, false
+    local function flush()
+        local entry = table.concat(current):match("^%s*(.-)%s*$")
+        if entry ~= "" then out[#out + 1] = entry end
+        current = {}
+    end
+    for index = 1, #text do
+        local char = text:sub(index, index)
+        if char == '"' then in_quotes = not in_quotes end
+        if char == "," and not in_quotes then
+            flush()
+        else
+            current[#current + 1] = char
+        end
+    end
+    flush()
+
+    for index, entry in ipairs(out) do
+        local name, address = entry:match('^"?(.-)"?%s*<(.-)>$')
+        if name and name ~= "" then
+            out[index] = MimeUtil.encodeHeaderWord(name) .. " <" .. address .. ">"
+        end
+    end
+    return table.concat(out, ", ")
+end
+
 --- Header lookup over Gmail's `payload.headers` array; case-insensitive.
 function MimeUtil.header(headers, name)
     if type(headers) ~= "table" then return nil end
