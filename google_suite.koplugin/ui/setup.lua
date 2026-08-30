@@ -18,6 +18,7 @@ local _ = require("gettext")
 
 local Account = require("lib/account")
 local Cache = require("lib/cache")
+local Sync = require("lib/sync")
 local Http = require("lib/http")
 local Task = require("ui/task")
 
@@ -128,6 +129,28 @@ function Setup.show(on_done)
                     settings:readSetting("week_start_dow") == 1 and 2 or 1)
                 settings:flush()
                 Setup.show(on_done)
+            end } },
+        { { text = Sync.isEnabled()
+                and T(_("Background refresh: every %1 min"), Sync.intervalMinutes())
+                or _("Background refresh: off"),
+            align = "left",
+            callback = function()
+                UIManager:close(dialog)
+                Sync.cycleInterval()
+                Setup.show(on_done)
+            end } },
+        { { text = _("Refresh the Home widget now"), align = "left",
+            callback = function()
+                UIManager:close(dialog)
+                -- Foreground, so this one may raise the Wi-Fi prompt and say
+                -- what happened; the background path deliberately does neither.
+                Task.run(_("Refreshing…"), function()
+                    return Sync.run{ max_age = 0, force = true, reason = "manual" }
+                end, function(fetched)
+                    Task.notify(fetched and _("Home widget updated.")
+                        or _("Nothing to update."))
+                    Setup.show(on_done)
+                end)
             end } },
         { { text = _("Clear cached mail and events"), align = "left",
             callback = function()

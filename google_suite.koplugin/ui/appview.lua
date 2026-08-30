@@ -6,12 +6,51 @@ hub screen — one tap saved on every launch, which matters on e-ink. Each secti
 carries a title-bar menu for switching to the other.
 --]]
 
+local UIManager = require("ui/uimanager")
+
 local Account = require("lib/account")
 local Setup = require("ui/setup")
 
 local AppView = {}
 
 local hub = {}
+
+--[[--
+Leaving the plugin.
+
+Sections call `close()` when they are switched as well as when they are
+dismissed, so "the plugin was closed" cannot be read from a single close. The
+refresh is scheduled a moment out instead, and any section appearing cancels it
+— what survives that delay is a real exit. The signal is a section *showing*
+rather than the hub being asked to open one, because switching calendar views
+re-shows without coming back through the hub.
+
+The repaint is the point of it. Reading and triaging mail rewrites the cache the
+Home widget draws from, so leaving is exactly when the Home page is most likely
+to be showing a count that is no longer true.
+--]]
+local pending_exit
+
+local function cancelExit()
+    if not pending_exit then return end
+    UIManager:unschedule(pending_exit)
+    pending_exit = nil
+end
+
+--- Called by every section as it appears.
+function hub.notifyOpened()
+    cancelExit()
+end
+
+--- Called by every section as it closes.
+function hub.notifyClosed()
+    cancelExit()
+    pending_exit = function()
+        pending_exit = nil
+        require("lib/sync").run{ reason = "left plugin" }
+    end
+    UIManager:scheduleIn(1, pending_exit)
+end
 
 local function remember(section)
     local settings = Account:settings()
@@ -51,6 +90,8 @@ function AppView.open()
     return hub.openMail()
 end
 
+AppView.notifyClosed = hub.notifyClosed
+AppView.notifyOpened = hub.notifyOpened
 AppView.openMail = hub.openMail
 AppView.openAgenda = hub.openAgenda
 AppView.openSettings = hub.openSettings

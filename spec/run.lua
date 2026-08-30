@@ -22,7 +22,7 @@ end
 for _i, name in ipairs({
     "lib/const", "lib/http", "lib/account", "lib/cache", "lib/fmt",
     "lib/mimeutil", "lib/batch", "lib/gmail", "lib/gcal", "lib/icons",
-    "lib/zenos", "lib/compose",
+    "lib/zenos", "lib/compose", "lib/sync",
     "ui/task", "ui/setup", "ui/sectionbutton", "ui/navbar", "ui/compose", "ui/mailview",
     "ui/maillist", "ui/agenda", "ui/calendargrid", "ui/eventlist",
     "ui/homewidget", "ui/appview", "main",
@@ -658,6 +658,35 @@ equal("drafts has a view", MailList.indexOfView("drafts") ~= nil, true)
 check("only the drafts view opens the composer",
       MailList.VIEWS[MailList.indexOfView("drafts")].drafts == true
       and MailList.VIEWS[MailList.indexOfView("sent")].drafts == nil)
+
+-- Background refresh settings. The cycle is pure so it can be walked here
+-- without a settings file behind it.
+local Sync = require("lib/sync")
+equal("an absent interval is the default", Sync.normalizeInterval(nil), 30)
+equal("a non-numeric interval is the default", Sync.normalizeInterval("soon"), 30)
+equal("an interval below the fetch floor is the default", Sync.normalizeInterval(1), 30)
+equal("a numeric string is accepted", Sync.normalizeInterval("60"), 60)
+equal("a fractional interval is floored", Sync.normalizeInterval(45.7), 45)
+
+-- off -> 30 -> 60 -> 120 -> off, and turning it back on lands on the default.
+local function nextOf(enabled, minutes)
+    local next_enabled, next_minutes = Sync.nextInterval(enabled, minutes)
+    return (next_enabled and tostring(next_minutes) or "off")
+end
+equal("turning it on lands on the default", nextOf(false, 120), "30")
+equal("15 steps to 30", nextOf(true, 15), "30")
+equal("30 steps to 60", nextOf(true, 30), "60")
+equal("60 steps to 120", nextOf(true, 60), "120")
+equal("the last interval turns it off", nextOf(true, 120), "off")
+equal("an off-list interval returns to the default", nextOf(true, 47), "30")
+-- Every step of the cycle is reachable, and it comes back round to off.
+local seen, enabled, minutes = {}, true, Sync.INTERVALS[1]
+for _step = 1, #Sync.INTERVALS + 1 do
+    seen[#seen + 1] = enabled and tostring(minutes) or "off"
+    enabled, minutes = Sync.nextInterval(enabled, minutes)
+end
+equal("the cycle walks every interval then off",
+      table.concat(seen, ","), "15,30,60,120,off")
 
 -- ZenOS launchability: mirrors zen-os modules/menu/app_launcher/plugin_scan.lua,
 -- which is what decides whether this plugin can be added as a navbar tab.

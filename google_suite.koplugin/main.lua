@@ -15,6 +15,7 @@ local _ = require("gettext")
 
 local AppView = require("ui/appview")
 local HomeWidget = require("ui/homewidget")
+local Sync = require("lib/sync")
 
 local GoogleSuite = WidgetContainer:extend{
     name = "google_suite",
@@ -25,6 +26,35 @@ function GoogleSuite:init()
     self:onDispatcherRegisterActions()
     self.ui.menu:registerToMainMenu(self)
     HomeWidget.register()
+    Sync.restartTimer()
+end
+
+--[[--
+Waking up.
+
+The Home page is the first thing a Kindle shows after a wake, and it draws from
+a cache that may be hours old. The refresh is deferred a couple of seconds so
+the wake-up paint happens first, and it gives up silently unless the radio is
+already on — see lib/sync.lua.
+--]]
+function GoogleSuite:onResume()
+    Sync.runSoon{ reason = "resume" }
+    -- A suspend may have outlasted the pending tick.
+    Sync.restartTimer()
+end
+
+function GoogleSuite:onSuspend()
+    Sync.stopTimer()
+end
+
+--- Wi-Fi coming up is the one moment a fetch is certain to be possible.
+function GoogleSuite:onNetworkConnected()
+    Sync.runSoon{ reason = "network" }
+end
+
+--- Nothing in this plugin should outlive it.
+function GoogleSuite:onCloseWidget()
+    Sync.stopTimer()
 end
 
 function GoogleSuite:onDispatcherRegisterActions()

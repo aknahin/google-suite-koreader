@@ -256,6 +256,22 @@ radio. The cache it reads is refreshed by any calendar view, so it stays current
 whether you use the agenda or the grids. Tapping a box opens what it is showing:
 the left one your unread mail, the right one the agenda.
 
+It refreshes itself on four occasions: when the device wakes, when you leave the
+plugin, when Wi-Fi comes up, and on a timer you can set under *Background
+refresh* (off / 15 / 30 / 60 / 120 minutes, default 30).
+
+**A background refresh never turns the radio on.** It checks whether the device
+is already connected and gives up silently if it is not, so on a Kindle — asleep
+with Wi-Fi off most of the time — the timer usually costs one cheap check and
+nothing else. That is the intended behaviour: waking the radio on a schedule is
+a battery bill you did not agree to. When you *do* want it now regardless, the
+settings page has **Refresh the Home widget now**, which is a foreground action
+and may raise the usual Wi-Fi prompt.
+
+Leaving the plugin always redraws the widget even when nothing is fetched —
+reading and triaging mail rewrites the cache on the way out, so that is exactly
+when the Home page is most likely to be showing a count that is no longer true.
+
 **5.4a The ZenOS navbar**: plugin pages carry a navigation bar at the foot,
 built from ZenOS's own tab configuration — same tabs, same order, same height —
 with every tap handed back to ZenOS.
@@ -328,6 +344,7 @@ google_suite.koplugin/
   lib/batch.lua     Google's multipart batch protocol, shared by both APIs
   lib/gmail.lua     list (batched metadata), read, triage, send and drafts
   lib/compose.lua   builds the RFC 2822 messages Gmail's raw field takes
+  lib/sync.lua      the silent background refresh behind the Home widget
   lib/gcal.lua      calendars, agenda and grid ranges; timezone-safe date math
   lib/mimeutil.lua  base64url, quoted-printable, RFC 2047, HTML sanitising
   lib/cache.lua     disk cache

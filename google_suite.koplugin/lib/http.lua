@@ -28,6 +28,16 @@ Http.CAFILE = (pluginRoot() or ".") .. "/data/roots.pem"
 --- Set false only to diagnose a TLS problem; it turns off certificate checking.
 Http.verify_certificates = true
 
+--[[--
+Timeouts for work nobody asked for.
+
+A background refresh runs with no popup in front of it, so a stalled socket
+would freeze the UI with nothing on screen to explain why. `lib/sync.lua` sets
+this for the length of a silent refresh: fail fast and try again later beats
+hanging the device after a wake-up on a captive portal.
+--]]
+Http.background_timeouts = nil
+
 local function sslParams()
     if not Http.verify_certificates then
         return { protocol = "any", verify = "none", options = { "all", "no_sslv2", "no_sslv3" } }
@@ -79,8 +89,10 @@ function Http.request(o)
         request.source = ltn12.source.string(o.body)
     end
 
-    socketutil:set_timeout(o.block_timeout or socketutil.LARGE_BLOCK_TIMEOUT,
-                           o.total_timeout or socketutil.LARGE_TOTAL_TIMEOUT)
+    local background = Http.background_timeouts
+    socketutil:set_timeout(
+        o.block_timeout or (background and background.block) or socketutil.LARGE_BLOCK_TIMEOUT,
+        o.total_timeout or (background and background.total) or socketutil.LARGE_TOTAL_TIMEOUT)
     local code, resp_headers, status = socket.skip(1, http.request(request))
     socketutil:reset_timeout()
 

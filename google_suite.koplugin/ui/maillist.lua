@@ -284,9 +284,12 @@ function MailList:close()
         UIManager:close(self.menu)
         self.menu = nil
     end
+    -- Might be a section switch rather than an exit; the hub sorts that out.
+    self.hub.notifyClosed()
 end
 
 function MailList:show()
+    self.hub.notifyOpened()
     self.menu = Menu:new{
         title = self:title(),
         item_table = self:itemTable(),

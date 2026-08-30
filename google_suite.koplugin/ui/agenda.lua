@@ -498,9 +498,12 @@ function Agenda:close(keep_rotation)
     end
     self.suppress_restore = nil
     if not keep_rotation then self:restoreRotation() end
+    -- Might be a section switch rather than an exit; the hub sorts that out.
+    self.hub.notifyClosed()
 end
 
 function Agenda:show()
+    self.hub.notifyOpened()
     if self:mode() == "list" then return self:showList() end
     return self:showGrid()
 end
