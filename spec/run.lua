@@ -462,6 +462,76 @@ fakeZenOS({}, 96)
 equal("a bar with no tabs is no bar", ZenOS.navbarHeight(), 0)
 noZenOS()
 
+-- Modern HTML mail. What breaks crengine is fixed-width nested layout tables,
+-- inline CSS that positions or recolours text, and hidden preheaders.
+local marketing = [[
+<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office">
+<head><style>.btn{color:#fff;display:flex}</style><title>Newsletter</title></head>
+<body style="margin:0;background:#eee">
+<div style="display:none;font-size:1px;color:#eee">Preheader you should not read</div>
+<!--[if mso]><table><tr><td>Outlook only</td></tr></table><![endif]-->
+<table width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff">
+  <tbody>
+    <tr><td width="600" style="padding:20px" align="center">
+      <table width="560"><tr><td>&nbsp;</td></tr>
+        <tr><td><h1 style="font-size:48px;color:#ffffff">Big news</h1></td></tr>
+        <tr><td><p style="color:#333" class="body">Hello <b>there</b>, read on.</p></td></tr>
+        <tr><td><a href="https://track.example/x?u=1" style="color:#fff" target="_blank">Read more</a></td></tr>
+      </table>
+    </td></tr>
+    <tr><td><img src="https://track.example/pixel.gif" width="1" height="1" alt=""></td></tr>
+  </tbody>
+</table>
+<o:p></o:p>
+</body></html>
+]]
+local clean = MimeUtil.sanitizeHtml(marketing)
+
+check("stylesheet rules are gone", not clean:find("display:flex", 1, true))
+check("the title is gone", not clean:find("Newsletter", 1, true))
+check("the hidden preheader is gone", not clean:find("Preheader", 1, true))
+check("the Outlook-only copy is gone", not clean:find("Outlook only", 1, true))
+check("the tracking pixel is gone", not clean:find("pixel.gif", 1, true))
+check("no table tags survive", not clean:lower():find("<table", 1, true))
+check("no row tags survive", not clean:lower():find("<tr", 1, true))
+check("no cell tags survive", not clean:lower():find("<td", 1, true))
+check("no office namespace tags survive", not clean:lower():find("<o:", 1, true))
+check("no style attribute survives", not clean:lower():find("style=", 1, true))
+check("no width attribute survives", not clean:lower():find("width=", 1, true))
+check("no class attribute survives", not clean:lower():find("class=", 1, true))
+check("no bgcolor attribute survives", not clean:lower():find("bgcolor", 1, true))
+check("the doctype is gone", not clean:lower():find("doctype", 1, true))
+check("body wrapper is unwrapped", not clean:lower():find("<body", 1, true))
+
+check("the heading survives", clean:find("Big news", 1, true) ~= nil)
+check("the heading keeps its tag", clean:lower():find("<h1>", 1, true) ~= nil)
+check("the paragraph survives", clean:find("Hello", 1, true) ~= nil)
+check("inline emphasis survives", clean:find("<b>", 1, true) ~= nil)
+check("link text survives", clean:find("Read more", 1, true) ~= nil)
+check("cells became blocks", clean:find("<div>", 1, true) ~= nil)
+check("nbsp spacer cells left nothing behind", not clean:find("&nbsp;", 1, true))
+
+-- Line breaks are the one place a self-closing marker matters.
+local broken = MimeUtil.sanitizeHtml([[<p>one<br style="clear:both"/>two<br>three</p>]])
+check("a self-closing break stays self-closing", broken:find("<br />", 1, true) ~= nil)
+check("break text survives", broken:find("two", 1, true) ~= nil)
+
+-- Lists and quotes are meaning, not decoration.
+local structure = MimeUtil.sanitizeHtml(
+    [[<ul class="x"><li style="color:red">one</li><li>two</li></ul><blockquote>said</blockquote>]])
+check("lists survive", structure:find("<li>", 1, true) ~= nil)
+check("quotes survive", structure:find("<blockquote>", 1, true) ~= nil)
+check("list styling is gone", not structure:find("color:red", 1, true))
+
+-- Event handlers and data attributes are never content.
+local scripted = MimeUtil.sanitizeHtml([[<div onclick="steal()" data-id="7">safe</div>]])
+check("event handlers are gone", not scripted:find("steal", 1, true))
+check("data attributes are gone", not scripted:find("data-id", 1, true))
+check("the text is kept", scripted:find("safe", 1, true) ~= nil)
+
+equal("non-string input is still tolerated", MimeUtil.sanitizeHtml(nil), "")
+
 -- ZenOS launchability: mirrors zen-os modules/menu/app_launcher/plugin_scan.lua,
 -- which is what decides whether this plugin can be added as a navbar tab.
 local GoogleSuite = require("main")

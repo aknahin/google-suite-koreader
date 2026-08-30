@@ -23,8 +23,16 @@ local Task = require("ui/task")
 
 local MailView = {}
 
+--[[--
+Cached bodies are stored already sanitised, so a change to how mail is cleaned
+up does not reach a message that has been opened before. The suffix is the
+sanitiser's generation: bumping it makes every cached body miss once and come
+back through the current code.
+--]]
+local BODY_CACHE_GENERATION = 2
+
 local function bodyCacheKey(id)
-    return "message_" .. id
+    return "message_" .. id .. "_v" .. BODY_CACHE_GENERATION
 end
 
 local function preferHtml()
@@ -55,6 +63,28 @@ local function header(message, as_html)
     end
     return "<div style=\"font-size: 80%\">" .. table.concat(escaped, "<br/>") ..
            "</div><hr/>"
+end
+
+--[[--
+Wraps the cleaned-up fragment in a document.
+
+The stylesheet is the counterweight to what `MimeUtil.sanitizeHtml` throws away:
+with every width and font-size gone, this is what stops anything left over —
+a stray table the sanitiser could not flatten, an oversized image placeholder —
+from setting its own width and pushing the text off a 6" screen.
+--]]
+local DOCUMENT_CSS = [[
+* { max-width: 100%; }
+body { margin: 0; padding: 0; text-align: left; }
+div, p, td, th { width: auto !important; }
+table { width: auto !important; table-layout: auto; }
+pre { white-space: pre-wrap; word-wrap: break-word; }
+blockquote { margin-left: 1em; padding-left: 0.5em; border-left: 1px solid #808080; }
+]]
+
+local function document(body)
+    return "<html><head><style>" .. DOCUMENT_CSS .. "</style></head><body>"
+        .. body .. "</body></html>"
 end
 
 --- Renders as HTML only when there is HTML worth rendering.
@@ -185,7 +215,7 @@ function MailView.show(opts)
         viewer = TextViewer:new{
             title = (message.subject and message.subject ~= "") and message.subject
                 or _("(no subject)"),
-            text = as_html and (header(message, true) .. message.html)
+            text = as_html and document(header(message, true) .. message.html)
                 or (header(message, false) .. (message.body or "")),
             text_format = as_html and "html" or nil,
             text_type = "file_content",
