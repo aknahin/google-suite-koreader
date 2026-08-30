@@ -16,6 +16,9 @@ plugin, so it can be added as a navbar tab and contribute a Home-page widget.
   network, and cached events never expire, so the calendar still opens with Wi-Fi
   off. Anything older than the last successful fetch is labelled *cached*, not
   hidden.
+- **One tap between the two** — every mail page carries a calendar button beside
+  its close icon, and every calendar page a mail button, so switching never goes
+  through a menu.
 
 Composing mail and creating events are deliberately out of scope for now.
 
@@ -245,7 +248,16 @@ Give it a label and an icon if you like. It can also be set as the default tab.
 **Google Suite**. Two boxes side by side — unread count, and the next event's
 time and title — drawn purely from the cache so the Home page never waits on the
 radio. The cache it reads is refreshed by any calendar view, so it stays current
-whether you use the agenda or the grids.
+whether you use the agenda or the grids. Tapping a box opens what it is showing:
+the left one your unread mail, the right one the agenda.
+
+**5.4a The ZenOS navbar**: plugin pages stop short of the bottom of the screen
+so ZenOS's navigation bar stays visible and tappable underneath them. That is as
+far as the integration can go — ZenOS builds the bar inside its own navbar patch
+and mounts it only into pages it owns, picked from a hardcoded list of its page
+names, so a third-party plugin cannot host a real one or light up its own tab.
+The grid views turn the screen to landscape and give the strip back while they
+do, since the bar underneath is still drawn portrait.
 
 **5.5 Bind a gesture** (optional): *Tools > Gestures* — the plugin registers a
 **Google Suite** action you can attach to any gesture or key.
@@ -311,8 +323,12 @@ google_suite.koplugin/
   lib/gcal.lua      calendars, agenda and grid ranges; timezone-safe date math
   lib/mimeutil.lua  base64url, quoted-printable, RFC 2047, HTML sanitising
   lib/cache.lua     disk cache
+  lib/icons.lua     the mail and calendar SVGs KOReader's icon set lacks
+  lib/zenos.lua     the ZenOS globals: navbar height, home-item registration
   ui/calendargrid   the month/week grid widget, with rotation handling
   ui/eventlist      the paged list of event cards, shared by agenda and day view
+  ui/sectionbutton  the mail/calendar button placed beside a title bar's close
   ui/               menus, message view, agenda, setup, ZenOS home widget
+  icons/            plugin-owned SVGs, loaded by path rather than by name
   tools/            the computer-side sign-in helper
 ```

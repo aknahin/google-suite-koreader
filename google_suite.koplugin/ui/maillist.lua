@@ -14,7 +14,9 @@ local Cache = require("lib/cache")
 local Fmt = require("lib/fmt")
 local Gmail = require("lib/gmail")
 local MailView = require("ui/mailview")
+local SectionButton = require("ui/sectionbutton")
 local Task = require("ui/task")
+local ZenOS = require("lib/zenos")
 
 local MailList = {}
 MailList.__index = MailList
@@ -28,9 +30,21 @@ MailList.VIEWS = {
 
 local CACHE_MAX_AGE = 6 * 3600
 
+--- The index of a view key, or nil. Lets callers open straight to "unread".
+function MailList.indexOfView(view_key)
+    for index, view in ipairs(MailList.VIEWS) do
+        if view.key == view_key then return index end
+    end
+end
+
 --- @tparam table hub provides openAgenda() and openSettings()
-function MailList.new(hub)
-    return setmetatable({ hub = hub, view_index = 1, messages = {} }, MailList)
+--- @tparam string|nil view_key which saved search to open on; defaults to Inbox
+function MailList.new(hub, view_key)
+    return setmetatable({
+        hub = hub,
+        view_index = MailList.indexOfView(view_key) or 1,
+        messages = {},
+    }, MailList)
 end
 
 function MailList:view()
@@ -254,6 +268,9 @@ function MailList:show()
         is_borderless = true,
         is_popout = false,
         single_line = true,
+        -- Stop short of the ZenOS navbar so it stays visible and tappable.
+        height = ZenOS.pageHeight(),
+        covers_fullscreen = ZenOS.coversFullscreen(),
         title_bar_left_icon = "appbar.menu",
         onLeftButtonTap = function() self:openNavMenu() end,
         onMenuSelect = function(_menu, item)
@@ -277,6 +294,10 @@ function MailList:show()
         end,
         close_callback = function() self:close() end,
     }
+    SectionButton.attach(self.menu.title_bar, "calendar", function()
+        self:close()
+        self.hub.openAgenda("week")
+    end)
     UIManager:show(self.menu)
     self:load()
     return self.menu

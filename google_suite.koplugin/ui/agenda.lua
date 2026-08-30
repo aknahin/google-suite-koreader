@@ -36,16 +36,21 @@ local AGENDA_CACHE_KEY = "agenda"
 -- this is labelled instead of discarded.
 local FRESH_FOR = 900
 
-function Agenda.new(hub)
-    return setmetatable({ hub = hub, events = {}, events_by_day = {} }, Agenda)
+--- @tparam string|nil mode forces "list"/"week"/"month" for this visit only
+function Agenda.new(hub, mode)
+    return setmetatable({
+        hub = hub, events = {}, events_by_day = {}, forced_mode = mode,
+    }, Agenda)
 end
 
 function Agenda:settings()
     return Account:settings()
 end
 
+--- A forced mode wins until the user picks one themselves, so arriving here
+--- from the Home page or the mail button does not rewrite their default view.
 function Agenda:mode()
-    return self:settings():readSetting("calendar_view") or "list"
+    return self.forced_mode or self:settings():readSetting("calendar_view") or "list"
 end
 
 function Agenda:startDow()
@@ -140,11 +145,14 @@ end
 
 -- --------------------------------------------------------------- rotation ---
 
+--- @treturn boolean whether the screen was actually turned
 function Agenda:enterLandscape()
-    if self:settings():isFalse("grid_landscape") then return end
-    if Screen:getWidth() >= Screen:getHeight() then return end -- already landscape
+    if self:settings():isFalse("grid_landscape") then return false end
+    if Screen:getWidth() >= Screen:getHeight() then return false end -- already landscape
     self.rotation_backup = Screen:getRotationMode()
     Screen:setRotationMode(Screen.DEVICE_ROTATED_CLOCKWISE)
+    self.rotated = true
+    return true
 end
 
 function Agenda:restoreRotation()
@@ -153,6 +161,7 @@ function Agenda:restoreRotation()
         Screen:setRotationMode(self.rotation_backup)
     end
     self.rotation_backup = nil
+    self.rotated = nil
 end
 
 -- ------------------------------------------------------------- list view ---
@@ -207,6 +216,7 @@ function Agenda:showList()
         events = self.events,
         on_menu = function() self:openNavMenu() end,
         on_event_tap = function(event) self:showEvent(event) end,
+        on_section_switch = function() self:openMail() end,
         close_callback = function()
             self.list = nil
             self:close()
@@ -263,12 +273,14 @@ function Agenda:showGrid()
     self:enterLandscape()
     local cells = self:period()
     self.grid = CalendarGrid:new{
+        reserve_navbar = not self.rotated,
         mode = self:mode(),
         anchor = self:anchorKey(),
         start_dow = self:startDow(),
         events_by_day = self.events_by_day,
         title = self:gridTitle(cells),
         on_menu = function() self:openNavMenu() end,
+        on_section_switch = function() self:openMail() end,
         on_day_tap = function(day_key) self:showDay(day_key) end,
         on_navigate = function(step)
             self:shiftAnchor(step)
@@ -294,6 +306,8 @@ function Agenda:showDay(day_key)
         title = Fmt.dayHeading(day_key),
         events = self.events_by_day[day_key] or {},
         day_headings = false,
+        -- Opened from the grid, which may have turned the screen.
+        reserve_navbar = not self.rotated,
         on_event_tap = function(event) self:showEvent(event) end,
         close_callback = function() self.day_list = nil end,
     }
@@ -386,6 +400,12 @@ function Agenda:chooseCalendars()
     UIManager:show(dialog)
 end
 
+--- Leaves the calendar for the mail the user is most likely after.
+function Agenda:openMail()
+    self:close()
+    self.hub.openMail("unread")
+end
+
 function Agenda:reload(force)
     if self:mode() == "list" then self:loadList(force) else self:loadGrid(force) end
 end
@@ -396,6 +416,7 @@ end
 function Agenda:switchMode(mode)
     local previous = self:mode()
     if mode == previous then return end
+    self.forced_mode = nil
     self:settings():saveSetting("calendar_view", mode)
     self:settings():flush()
     local both_grids = previous ~= "list" and mode ~= "list"
@@ -439,6 +460,10 @@ function Agenda:openNavMenu()
             UIManager:close(dialog)
             self:close()
             self.hub.openMail()
+        end } },
+        { { text = _("Unread mail"), align = "left", callback = function()
+            UIManager:close(dialog)
+            self:openMail()
         end } },
         { { text = _("Settings"), align = "left",
             callback = function() UIManager:close(dialog) self.hub.openSettings() end } },

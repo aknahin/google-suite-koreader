@@ -21,9 +21,11 @@ end
 -- Every module must at least load cleanly.
 for _i, name in ipairs({
     "lib/const", "lib/http", "lib/account", "lib/cache", "lib/fmt",
-    "lib/mimeutil", "lib/batch", "lib/gmail", "lib/gcal",
-    "ui/task", "ui/setup", "ui/mailview", "ui/maillist", "ui/agenda",
-    "ui/calendargrid", "ui/eventlist", "ui/homewidget", "ui/appview", "main",
+    "lib/mimeutil", "lib/batch", "lib/gmail", "lib/gcal", "lib/icons",
+    "lib/zenos",
+    "ui/task", "ui/setup", "ui/sectionbutton", "ui/mailview", "ui/maillist",
+    "ui/agenda", "ui/calendargrid", "ui/eventlist", "ui/homewidget",
+    "ui/appview", "main",
 }) do
     local ok, err = pcall(require, name)
     check("loads " .. name, ok, err)
@@ -366,6 +368,43 @@ equal("a lone heading stays put",
       shapeOf(pagesOf({ heading(20), card(90), card(90) }, 100)), "2,1")
 equal("a trailing heading is not moved for a block that does not exist",
       shapeOf(pagesOf({ card(50), heading(20) }, 100)), "2")
+
+-- Opening straight to a saved search, for the Home widget's mail box and the
+-- calendar's Inbox button.
+local MailList = require("ui/maillist")
+equal("unread resolves to its view", MailList.indexOfView("unread"), 2)
+equal("inbox resolves to its view", MailList.indexOfView("inbox"), 1)
+equal("an unknown view key resolves to nothing", MailList.indexOfView("spam"), nil)
+equal("no view key resolves to nothing", MailList.indexOfView(nil), nil)
+check("a nil key falls back to Inbox", MailList.new({}, nil).view_index == 1)
+check("a bad key falls back to Inbox", MailList.new({}, "spam").view_index == 1)
+check("a good key is honoured", MailList.new({}, "unread").view_index == 2)
+
+-- The icons ship with the plugin; KOReader's own set has no mail or calendar
+-- glyph and silently substitutes "icon not found" for an unknown name, so a
+-- missing file here would be invisible on the device.
+local Icons = require("lib/icons")
+check("the mail icon is present", Icons.path("mail") ~= nil)
+check("the calendar icon is present", Icons.path("calendar") ~= nil)
+equal("an unknown icon resolves to nothing", Icons.path("nope"), nil)
+
+-- ZenOS navbar reservation. The stub screen is 800 tall.
+local ZenOS = require("lib/zenos")
+_G.__ZEN_UI_NAVBAR_HEIGHT = nil
+equal("no ZenOS means no reserved strip", ZenOS.navbarHeight(), 0)
+equal("the page is the whole screen without ZenOS", ZenOS.pageHeight(), 800)
+check("the page covers the screen without ZenOS", ZenOS.coversFullscreen())
+_G.__ZEN_UI_NAVBAR_HEIGHT = 96
+equal("a published navbar height is reserved", ZenOS.navbarHeight(), 96)
+equal("the page stops above the navbar", ZenOS.pageHeight(), 704)
+check("the page no longer covers the screen", not ZenOS.coversFullscreen())
+_G.__ZEN_UI_NAVBAR_HEIGHT = 0
+equal("a zero height reserves nothing", ZenOS.navbarHeight(), 0)
+_G.__ZEN_UI_NAVBAR_HEIGHT = 600
+equal("an implausible height is ignored", ZenOS.navbarHeight(), 0)
+_G.__ZEN_UI_NAVBAR_HEIGHT = "tall"
+equal("a non-numeric height is ignored", ZenOS.navbarHeight(), 0)
+_G.__ZEN_UI_NAVBAR_HEIGHT = nil
 
 -- ZenOS launchability: mirrors zen-os modules/menu/app_launcher/plugin_scan.lua,
 -- which is what decides whether this plugin can be added as a navbar tab.

@@ -19,16 +19,19 @@ local function remember(section)
     settings:flush()
 end
 
-function hub.openMail()
+--- @tparam string|nil view_key one of MailList.VIEWS, e.g. "unread"
+function hub.openMail(view_key)
     remember("mail")
     local MailList = require("ui/maillist")
-    return MailList.new(hub):show()
+    return MailList.new(hub, view_key):show()
 end
 
-function hub.openAgenda()
+--- @tparam string|nil mode "list", "week" or "month", for this visit only; the
+--- saved calendar_view is left alone so a jump here does not become the default.
+function hub.openAgenda(mode)
     remember("calendar")
     local Agenda = require("ui/agenda")
-    return Agenda.new(hub):show()
+    return Agenda.new(hub, mode):show()
 end
 
 function hub.openSettings()
@@ -51,5 +54,21 @@ end
 AppView.openMail = hub.openMail
 AppView.openAgenda = hub.openAgenda
 AppView.openSettings = hub.openSettings
+
+--[[--
+Opens straight to a section, for the ZenOS Home widget.
+
+The Home page can be showing while the plugin is not, so this runs the same
+sign-in guard `AppView.open` does rather than assuming an account exists.
+--]]
+function AppView.openSection(section, target)
+    Setup.applyPreferences()
+    if not Account:isConfigured() then
+        Setup.showOnboarding(function() AppView.open() end)
+        return
+    end
+    if section == "calendar" then return hub.openAgenda(target) end
+    return hub.openMail(target)
+end
 
 return AppView

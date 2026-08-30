@@ -35,6 +35,8 @@ local T = require("ffi/util").template
 local _ = require("gettext")
 
 local Fmt = require("lib/fmt")
+local SectionButton = require("ui/sectionbutton")
+local ZenOS = require("lib/zenos")
 
 local Input = Device.input
 local Screen = Device.screen
@@ -47,6 +49,8 @@ local EventList = InputContainer:extend{
     empty_text = nil,
     on_menu = nil,           -- function(); omitted hides the title bar's left icon
     on_event_tap = nil,      -- function(event)
+    on_section_switch = nil, -- function(); adds the Inbox button beside close
+    reserve_navbar = true,   -- false once the screen has been rotated
     close_callback = nil,
 }
 
@@ -55,8 +59,14 @@ local TITLE_LINES = 2
 local NOTE_LINES = 2
 
 function EventList:init()
-    self.dimen = Geom:new{ w = Screen:getWidth(), h = Screen:getHeight() }
-    self.covers_fullscreen = true
+    -- Stop short of the ZenOS navbar so it stays visible; taps in the strip we
+    -- do not claim fall through the window stack to the bar's owner. Not while
+    -- the screen has been rotated, though: what is painted underneath is the
+    -- FileManager's last portrait frame, so the strip would expose a stale bar
+    -- rather than a usable one.
+    local reserved = self.reserve_navbar and ZenOS.navbarHeight() or 0
+    self.dimen = Geom:new{ w = Screen:getWidth(), h = Screen:getHeight() - reserved }
+    self.covers_fullscreen = reserved == 0
     self.page = self.page or 1
 
     if Device:hasKeys() then
@@ -126,6 +136,9 @@ function EventList:layoutTitleBar(subtitle)
         close_callback = function() self:onClose() end,
         show_parent = self,
     }
+    if self.on_section_switch then
+        SectionButton.attach(self.title_bar, "mail", self.on_section_switch)
+    end
     self.content_top = self.title_bar:getHeight()
     self.content_height = self.dimen.h - self.content_top - self.outer_padding
 end

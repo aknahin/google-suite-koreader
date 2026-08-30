@@ -39,6 +39,8 @@ local _ = require("gettext")
 
 local Fmt = require("lib/fmt")
 local Gcal = require("lib/gcal")
+local SectionButton = require("ui/sectionbutton")
+local ZenOS = require("lib/zenos")
 
 local Input = Device.input
 local Screen = Device.screen
@@ -54,6 +56,8 @@ local CalendarGrid = InputContainer:extend{
     on_day_tap = nil,        -- function(day_key)
     on_navigate = nil,       -- function(step) with step -1 or 1
     on_menu = nil,
+    on_section_switch = nil, -- function(); adds the Inbox button beside close
+    reserve_navbar = true,   -- false once we have rotated away from ZenOS
     close_callback = nil,
 }
 
@@ -67,8 +71,14 @@ function CalendarGrid:cells()
 end
 
 function CalendarGrid:init()
-    self.dimen = Geom:new{ w = Screen:getWidth(), h = Screen:getHeight() }
-    self.covers_fullscreen = true
+    -- Stop short of the ZenOS navbar so it stays visible; taps in the strip we
+    -- do not claim fall through the window stack to the bar's owner. Not while
+    -- we have rotated the screen, though: what is painted underneath is the
+    -- FileManager's last portrait frame, so the strip would expose a stale bar
+    -- rather than a usable one.
+    local reserved = self.reserve_navbar and ZenOS.navbarHeight() or 0
+    self.dimen = Geom:new{ w = Screen:getWidth(), h = Screen:getHeight() - reserved }
+    self.covers_fullscreen = reserved == 0
 
     if Device:hasKeys() then
         self.key_events.Close = { { Input.group.Back } }
@@ -104,6 +114,9 @@ function CalendarGrid:init()
         close_callback = function() self:onClose() end,
         show_parent = self,
     }
+    if self.on_section_switch then
+        SectionButton.attach(self.title_bar, "mail", self.on_section_switch)
+    end
 
     local day_names = self:buildDayNames()
     local cells = self:cells()

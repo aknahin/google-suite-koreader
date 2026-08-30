@@ -18,6 +18,7 @@ local Account = require("lib/account")
 local Cache = require("lib/cache")
 local Fmt = require("lib/fmt")
 local Gmail = require("lib/gmail")
+local SectionButton = require("ui/sectionbutton")
 local Task = require("ui/task")
 
 local MailView = {}
@@ -190,6 +191,11 @@ function MailView.show(opts)
             text_type = "file_content",
             buttons_table = buttons,
         }
+        -- TextViewer names its title bar `titlebar`, not `title_bar`.
+        SectionButton.attach(viewer.titlebar, "calendar", function()
+            UIManager:close(viewer)
+            require("ui/appview").openSection("calendar", "week")
+        end)
         UIManager:show(viewer)
     end
 
