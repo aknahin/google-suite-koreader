@@ -317,22 +317,22 @@ tabs is what is on screen while this plugin is open.
 
 ## Development
 
-```sh
-luajit spec/run.lua
-```
-
-`spec/harness.lua` stubs KOReader so the pure logic runs on a desktop: MIME and
-RFC 2047 decoding, RFC 3339 parsing, the batch protocol, query building, the
-calendar grid's date arithmetic, and the tap-to-day-cell geometry. It also asserts
+There is a test harness — a KOReader stub plus about 290 assertions over the
+parts that can be checked without a device: MIME and RFC 2047 decoding, base64
+in both directions, RFC 3339 parsing, the batch protocol, query building, the
+calendar grid's date arithmetic and tap-to-day-cell geometry, the agenda window,
+HTML sanitising, message building, and the ZenOS navbar config. It also asserts
 the plugin still satisfies the ZenOS launcher contract in
 `zen-os/modules/menu/app_launcher/plugin_scan.lua`, which is what makes it
 eligible to be a navbar tab.
 
-Two notes for anyone touching `lib/batch.lua`: Google picks a **fresh multipart
-boundary per response** and prefixes the body with a **CRLF before the first
-delimiter**. A parser anchored at position 1 looks correct against a hand-written
-fixture and fails against the real API — the test fixture carries that leading
-CRLF deliberately.
+It is deliberately **not published here** — this repository carries the plugin
+and nothing else, so what you download is what you install. Ask if you want it.
+
+Two notes for anyone touching `lib/batch.lua`, which is the piece most likely to
+bite: Google picks a **fresh multipart boundary per response** and prefixes the
+body with a **CRLF before the first delimiter**. A parser anchored at position 1
+looks correct against a hand-written fixture and fails against the real API.
 
 Layout:
 

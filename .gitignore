@@ -4,6 +4,10 @@ client_secret.json
 *token*.json
 *client_secret*.json
 
+# The test harness. Kept out of the published plugin at the owner's request;
+# it still lives in the working copy and is run with `luajit spec/run.lua`.
+spec/
+
 # CodeGraph index
 .codegraph/
 
