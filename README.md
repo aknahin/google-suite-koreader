@@ -152,9 +152,14 @@ authorized this client before. Remove its access at
 
 ### Stage 3 — Install the plugin on the Kindle
 
-**3.1 Connect the Kindle over USB** and wait for it to mount as a drive.
+**3.1 Get the plugin.** Download `google_suite.koplugin.zip` from the
+[latest release](https://github.com/aknahin/google-suite-koreader/releases/latest)
+and unzip it — that gives you a `google_suite.koplugin` folder. Cloning the
+repository works too; the folder is the same either way.
 
-**3.2 Copy the plugin folder.** Copy the whole `google_suite.koplugin` directory
+**3.2 Connect the Kindle over USB** and wait for it to mount as a drive.
+
+**3.3 Copy the plugin folder.** Copy the whole `google_suite.koplugin` directory
 to `koreader/plugins/` on that drive, so you end up with:
 
 ```
@@ -172,14 +177,14 @@ On macOS:
 cp -R google_suite.koplugin /Volumes/Kindle/koreader/plugins/
 ```
 
-**3.3 Copy the token file** to somewhere you can find on the device — the drive
+**3.4 Copy the token file** to somewhere you can find on the device — the drive
 root is easiest:
 
 ```sh
 cp google_token.json /Volumes/Kindle/
 ```
 
-**3.4 Eject the Kindle properly** and restart KOReader (exit and reopen it, or
+**3.5 Eject the Kindle properly** and restart KOReader (exit and reopen it, or
 restart the device).
 
 Other devices, for reference:
